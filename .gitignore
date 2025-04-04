@@ -15,6 +15,9 @@ yarn-error.log*
 dev/youtube-response.txt
 dev/parsed-captions.json
 dev/captions-data.json
+captions-data.json
+parsed-captions.json
+youtube-response.txt
 coverage/
 
 # Editor directories and files
