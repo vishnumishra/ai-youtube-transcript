@@ -1,0 +1,37 @@
+# Source files
+src/
+
+# Test files
+test/
+jest.config.js
+coverage/
+
+# Development files
+dev/
+.github/
+.vscode/
+.idea/
+.history/
+.editorconfig
+.gitignore
+.npmrc
+tsconfig.json
+tslint.json
+rollup.config.js
+
+# Debug files
+*.log
+*.tsbuildinfo
+
+# Example files (except the ones we want to include)
+example/*
+!example/advanced-cli.js
+!example/advanced-example.js
+
+# Misc
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

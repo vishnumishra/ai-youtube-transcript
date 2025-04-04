@@ -105,15 +105,24 @@ export class YoutubeTranscript {
       throw new YoutubeTranscriptNotAvailableError(identifier);
     }
 
+    // Parse global translation languages (if available)
+    let globalTranslationLanguages: LanguageInfo[] = [];
+    if (captions.translationLanguages) {
+      globalTranslationLanguages = captions.translationLanguages.map((lang: any) => ({
+        languageCode: lang.languageCode,
+        languageName: lang.languageName.simpleText
+      }));
+    }
+
     // Create transcript objects for each caption track
     const transcripts = captions.captionTracks.map((track: CaptionTrack) => {
-      // Parse translation languages
+      // Use track-specific translation languages if available, otherwise use global ones
       const translationLanguages: LanguageInfo[] = track.translationLanguages
         ? track.translationLanguages.map(lang => ({
             languageCode: lang.languageCode,
             languageName: lang.languageName.simpleText
           }))
-        : [];
+        : globalTranslationLanguages;
 
       return new Transcript(
         identifier,

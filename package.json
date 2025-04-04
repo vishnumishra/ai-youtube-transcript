@@ -14,6 +14,8 @@
     "test:manual": "node test/manual-test.js",
     "cli": "node example/advanced-cli.js",
     "example": "node example/advanced-example.js",
+    "debug:translations": "node dev/debug-translations.js",
+    "debug:youtube": "node dev/debug-youtube-response.js",
     "lint": "tslint -p tsconfig.json",
     "lint:fix": "tslint -p tsconfig.json --fix"
   },
@@ -50,7 +52,11 @@
     "typescript": "^4.0.3"
   },
   "files": [
-    "dist/*"
+    "dist",
+    "example/advanced-cli.js",
+    "example/advanced-example.js",
+    "LICENSE",
+    "README.md"
   ],
   "repository": "https://github.com/vishnumishra/ai-youtube-transcript.git",
   "publishConfig": {

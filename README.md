@@ -153,6 +153,10 @@ ytTranscript.fetch('VIDEO_ID_OR_URL', {
 
 ### Translating Transcripts
 
+Translation is a two-step process:
+1. First, find a transcript in a specific language
+2. Then, translate that transcript to another language
+
 ```javascript
 import { YoutubeTranscript } from 'ai-youtube-transcript';
 
@@ -161,22 +165,44 @@ const ytTranscript = new YoutubeTranscript();
 // Get the list of available transcripts
 ytTranscript.list('VIDEO_ID_OR_URL')
   .then(async transcriptList => {
-    // Find a transcript
+    // Step 1: Find a transcript in English
     const transcript = transcriptList.findTranscript(['en']);
 
     // Check if it can be translated
     if (transcript.isTranslatable) {
-      // Translate to Spanish
+      console.log(`Found translatable transcript in ${transcript.language}`);
+      console.log('Available translation languages:');
+      transcript.translationLanguages.forEach(lang => {
+        console.log(`- ${lang.languageName} (${lang.languageCode})`);
+      });
+
+      // Step 2: Translate to Spanish
       const translatedTranscript = transcript.translate('es');
 
       // Fetch the translated transcript
       const fetchedTranslation = await translatedTranscript.fetch();
-      console.log(`Translated to Spanish: ${fetchedTranslation.getText()}`);
+      console.log(`Translated to Spanish: ${fetchedTranslation.getText().substring(0, 100)}...`);
+    } else {
+      console.log(`Transcript in ${transcript.language} is not translatable`);
     }
   })
   .catch(error => {
     console.error('Error:', error.message);
   });
+```
+
+You can also do this in a single chain:
+
+```javascript
+ytTranscript.list('VIDEO_ID_OR_URL')
+  .then(list => list.findTranscript(['en']))
+  .then(transcript => transcript.isTranslatable ? transcript.translate('es') : null)
+  .then(translatedTranscript => translatedTranscript ? translatedTranscript.fetch() : null)
+  .then(result => {
+    if (result) console.log(`Translated transcript: ${result.getText().substring(0, 100)}...`);
+    else console.log('Translation not available');
+  })
+  .catch(error => console.error('Error:', error.message));
 ```
 
 ### Using Formatters
@@ -366,7 +392,7 @@ Options:
   --languages, -l <langs>       Comma-separated list of language codes in order of preference (default: en)
   --format, -f <format>         Output format: text, json, srt (default: text)
   --output, -o <file>           Write output to a file instead of stdout
-  --translate, -t <lang>        Translate transcript to the specified language
+  --translate, -t <lang>        Translate transcript to the specified language (can be combined with --languages)
   --list-transcripts            List all available transcripts for the video
   --exclude-generated           Only use manually created transcripts
   --exclude-manually-created    Only use automatically generated transcripts
@@ -393,6 +419,9 @@ npx ai-youtube-transcript dQw4w9WgXcQ --format json --output transcript.json
 
 # Translate to German
 npx ai-youtube-transcript dQw4w9WgXcQ --translate de
+
+# Find a French transcript and translate it to German
+npx ai-youtube-transcript dQw4w9WgXcQ --languages fr --translate de
 
 # List available transcripts
 npx ai-youtube-transcript --list-transcripts dQw4w9WgXcQ
@@ -582,6 +611,25 @@ ytTranscript.fetch('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
 ytTranscript.fetch('https://youtu.be/dQw4w9WgXcQ');
 ytTranscript.fetch('https://www.youtube.com/embed/dQw4w9WgXcQ');
 ```
+
+#### Translation Issues
+
+If you're having trouble with translation, keep in mind how the translation process works:
+
+1. First, a transcript is found in the specified language(s) using `--languages` or `-l`
+2. Then, if `--translate` or `-t` is specified, that transcript is translated to the target language
+
+For example:
+- `--languages en` finds an English transcript
+- `--translate fr` translates the found transcript to French
+- `--languages en --translate fr` finds an English transcript and translates it to French
+
+If translation fails, it could be because:
+- The found transcript is not translatable
+- The target language is not supported for translation
+- YouTube's translation service is temporarily unavailable
+
+Use `--list-transcripts` to see which transcripts are available and which ones are translatable.
 
 ### Error Handling
 

@@ -11,6 +11,12 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# Debug files
+dev/youtube-response.txt
+dev/parsed-captions.json
+dev/captions-data.json
+coverage/
+
 # Editor directories and files
 .history
 .idea
