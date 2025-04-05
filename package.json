@@ -1,6 +1,6 @@
 {
   "name": "ai-youtube-transcript",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Fetch and process transcripts from YouTube videos with support for multiple languages, translation, and formatting",
   "main": "dist/youtube-transcript.common.js",
   "browser": "dist/youtube-transcript.esm.js",
