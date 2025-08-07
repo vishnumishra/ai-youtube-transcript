@@ -67,4 +67,30 @@ export class Helpers {
   public static isVideoAvailable(html: string): boolean {
     return html.includes('"playabilityStatus":');
   }
+
+  /**
+   * Extract YouTube API key from homepage
+   *
+   * @param html - The HTML content of YouTube homepage
+   * @returns The extracted API key or null if not found
+   */
+  public static extractApiKey(html: string): string | null {
+    const match = html.match(Constants.RE_API_KEY);
+    return match ? match[1] : null; // Use group 1 since regex has capture group
+  }
+
+  /**
+   * Create request body for the YouTube player API (like Python library)
+   */
+  public static createPlayerRequestBody(videoId: string): any {
+    return {
+      context: {
+        client: {
+          clientName: Constants.YOUTUBE_CLIENT_NAME,
+          clientVersion: Constants.YOUTUBE_CLIENT_VERSION
+        }
+      },
+      videoId: videoId
+    };
+  }
 }

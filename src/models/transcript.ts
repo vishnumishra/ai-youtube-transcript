@@ -101,30 +101,38 @@ export class Transcript {
   ) {}
 
   /**
-   * Fetch the actual transcript data
+   * Get the transcript URL
+   */
+  get url(): string {
+    return this.baseUrl;
+  }
+
+  /**
+   * Fetch the actual transcript data using the new YouTube API
    * 
    * @param preserveFormatting - Whether to preserve HTML formatting
    */
   public async fetch(preserveFormatting: boolean = false): Promise<FetchedTranscript> {
-    const transcriptResponse = await fetch(this.baseUrl, {
-      headers: {
-        'Accept-Language': this.languageCode,
-        'User-Agent': Constants.USER_AGENT,
-      },
-    });
+    if (!this.httpClient || typeof this.httpClient.fetch !== 'function') {
+      throw new YoutubeTranscriptNotAvailableError('HttpClient is required for transcript fetching');
+    }
+
+    // Check if this transcript URL requires PoToken (like Python library)
+    if (this.url.includes('&exp=xpe')) {
+      throw new YoutubeTranscriptNotAvailableError('PoToken required for this transcript');
+    }
+
+    // Fetch transcript using the URL from the player response (like Python library)
+    const transcriptResponse = await this.httpClient.fetch(this.url);
     
     if (!transcriptResponse.ok) {
       throw new YoutubeTranscriptNotAvailableError(this.videoId);
     }
     
-    const transcriptBody = await transcriptResponse.text();
-    const results = [...transcriptBody.matchAll(Constants.RE_XML_TRANSCRIPT)];
+    const transcriptXml = await transcriptResponse.text();
     
-    const snippets = results.map((result) => ({
-      text: preserveFormatting ? result[3] : result[3].replace(/<[^>]*>/g, ''),
-      start: parseFloat(result[1]),
-      duration: parseFloat(result[2]),
-    }));
+    // Parse the XML transcript data
+    const snippets = this.parseTranscriptXml(transcriptXml, preserveFormatting);
     
     return new FetchedTranscript(
       snippets,
@@ -133,6 +141,88 @@ export class Transcript {
       this.languageCode,
       this.isGenerated
     );
+  }
+
+  /**
+   * Parse XML transcript data (like Python library)
+   * 
+   * @param xmlData - The XML response from the timedtext API
+   * @param preserveFormatting - Whether to preserve HTML formatting
+   * @returns Array of transcript snippets
+   */
+  private parseTranscriptXml(xmlData: string, preserveFormatting: boolean): TranscriptSnippet[] {
+    try {
+      const snippets: TranscriptSnippet[] = [];
+      
+      // Simple regex-based XML parsing (handle both <text> and <p> formats)
+      // First try the new <p> format
+      let textMatches = xmlData.match(/<p[^>]*t="([^"]*)"[^>]*d="([^"]*?)"[^>]*>([^<]*)<\/p>/g);
+      let isNewFormat = true;
+      
+      // If no matches, try the old <text> format
+      if (!textMatches) {
+        textMatches = xmlData.match(/<text[^>]*start="([^"]*)"[^>]*dur="([^"]*?)"[^>]*>([^<]*)<\/text>/g);
+        isNewFormat = false;
+      }
+      
+      if (textMatches) {
+        for (const match of textMatches) {
+          let startMatch, durMatch, textMatch;
+          
+          if (isNewFormat) {
+            // New format: <p t="1360" d="1680">[♪♪♪]</p>
+            startMatch = match.match(/t="([^"]*)"/); 
+            durMatch = match.match(/d="([^"]*)"/); 
+            textMatch = match.match(/>([^<]*)</);
+          } else {
+            // Old format: <text start="1.36" dur="1.68">[♪♪♪]</text>
+            startMatch = match.match(/start="([^"]*)"/); 
+            durMatch = match.match(/dur="([^"]*)"/); 
+            textMatch = match.match(/>([^<]*)</);
+          }
+          
+          if (startMatch && durMatch && textMatch) {
+            let text = textMatch[1];
+            
+            // Decode HTML entities
+            text = text.replace(/&amp;/g, '&')
+                      .replace(/&lt;/g, '<')
+                      .replace(/&gt;/g, '>')
+                      .replace(/&quot;/g, '"')
+                      .replace(/&#39;/g, "'");
+            
+            // Remove HTML tags if not preserving formatting
+            if (!preserveFormatting) {
+              text = text.replace(/<[^>]*>/g, '');
+            }
+            
+            // Handle time conversion based on format
+            let startTime, duration;
+            if (isNewFormat) {
+              // New format uses milliseconds
+              startTime = parseFloat(startMatch[1]) / 1000;
+              duration = parseFloat(durMatch[1]) / 1000;
+            } else {
+              // Old format uses seconds
+              startTime = parseFloat(startMatch[1]);
+              duration = parseFloat(durMatch[1]);
+            }
+            
+            snippets.push({
+              text: text.trim(),
+              start: startTime,
+              duration: duration
+            });
+          }
+        }
+      }
+      
+      return snippets;
+      
+    } catch (error) {
+      console.error('Error parsing XML transcript:', error);
+      return [];
+    }
   }
 
   /**
@@ -185,9 +275,23 @@ export class TranscriptList {
    * @param videoId - The YouTube video ID
    */
   constructor(
-    private transcripts: Transcript[], 
+    private _transcripts: Transcript[], 
     private videoId: string
   ) {}
+
+  /**
+   * Get the list of transcripts
+   */
+  get transcripts(): Transcript[] {
+    return this._transcripts;
+  }
+
+  /**
+   * Get the number of available transcripts
+   */
+  get length(): number {
+    return this._transcripts.length;
+  }
 
   /**
    * Find a transcript in the specified languages
@@ -196,7 +300,7 @@ export class TranscriptList {
    */
   public findTranscript(languageCodes: string[]): Transcript {
     for (const languageCode of languageCodes) {
-      const transcript = this.transcripts.find(t => t.languageCode === languageCode);
+      const transcript = this._transcripts.find(t => t.languageCode === languageCode);
       if (transcript) {
         return transcript;
       }
@@ -204,7 +308,7 @@ export class TranscriptList {
 
     throw new YoutubeTranscriptError(
       `No transcripts found in languages: ${languageCodes.join(', ')} for video ${this.videoId}. ` +
-      `Available languages: ${this.transcripts.map(t => t.languageCode).join(', ')}`
+      `Available languages: ${this._transcripts.map(t => t.languageCode).join(', ')}`
     );
   }
 
@@ -213,9 +317,13 @@ export class TranscriptList {
    * 
    * @param languageCodes - List of language codes in order of preference
    */
+  [Symbol.iterator]() {
+    return this._transcripts[Symbol.iterator]();
+  }
+
   public findManuallyCreatedTranscript(languageCodes: string[]): Transcript {
     for (const languageCode of languageCodes) {
-      const transcript = this.transcripts.find(
+      const transcript = this._transcripts.find(
         t => t.languageCode === languageCode && !t.isGenerated
       );
       if (transcript) {
@@ -223,7 +331,7 @@ export class TranscriptList {
       }
     }
 
-    const availableLanguages = this.transcripts
+    const availableLanguages = this._transcripts
       .filter(t => !t.isGenerated)
       .map(t => t.languageCode);
 
@@ -240,7 +348,7 @@ export class TranscriptList {
    */
   public findGeneratedTranscript(languageCodes: string[]): Transcript {
     for (const languageCode of languageCodes) {
-      const transcript = this.transcripts.find(
+      const transcript = this._transcripts.find(
         t => t.languageCode === languageCode && t.isGenerated
       );
       if (transcript) {
@@ -248,7 +356,7 @@ export class TranscriptList {
       }
     }
 
-    const availableLanguages = this.transcripts
+    const availableLanguages = this._transcripts
       .filter(t => t.isGenerated)
       .map(t => t.languageCode);
 
@@ -262,24 +370,8 @@ export class TranscriptList {
    * Get all transcripts
    */
   public getTranscripts(): Transcript[] {
-    return [...this.transcripts];
+    return [...this._transcripts];
   }
 
-  /**
-   * Implement iterator protocol
-   */
-  [Symbol.iterator]() {
-    let index = 0;
-    const transcripts = this.transcripts;
-    
-    return {
-      next: () => {
-        if (index < transcripts.length) {
-          return { value: transcripts[index++], done: false };
-        } else {
-          return { done: true, value: undefined };
-        }
-      }
-    };
-  }
+
 }

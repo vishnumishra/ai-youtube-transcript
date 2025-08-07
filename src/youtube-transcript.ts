@@ -1,4 +1,5 @@
 import {
+  YoutubeTranscriptError,
   YoutubeTranscriptTooManyRequestError,
   YoutubeTranscriptVideoUnavailableError,
   YoutubeTranscriptDisabledError,
@@ -7,7 +8,7 @@ import {
 
 import { TranscriptConfig, TranscriptResponse, CaptionTrack, LanguageInfo } from './models/interfaces';
 import { Transcript, TranscriptList, FetchedTranscript } from './models/transcript';
-// Constants are used in the Transcript class
+import { Constants } from './utils/constants';
 import { Helpers } from './utils/helpers';
 import { HttpClient } from './utils/http-client';
 import { ProxyConfig } from './proxies/proxy-config';
@@ -71,62 +72,91 @@ export class YoutubeTranscript {
   }
 
   /**
-   * List all available transcripts for a video
+   * List all available transcripts for a video using the player endpoint (like Python library)
    *
    * @param videoId - Video URL or video identifier
    */
   public async list(videoId: string): Promise<TranscriptList> {
     const identifier = Helpers.extractVideoId(videoId);
 
-    // Fetch the video page
-    const videoPageResponse = await this.httpClient.fetch(
-      `https://www.youtube.com/watch?v=${identifier}`
-    );
+    try {
+      // Step 1: Get the video page to extract API key
+      const videoPageResponse = await this.httpClient.fetch(
+        `https://www.youtube.com/watch?v=${identifier}`
+      );
+      const videoPageHtml = await videoPageResponse.text();
+      
+      // Check for errors
+      if (Helpers.hasCaptchaChallenge(videoPageHtml)) {
+        throw new YoutubeTranscriptTooManyRequestError();
+      }
 
-    const videoPageBody = await videoPageResponse.text();
+      if (!Helpers.isVideoAvailable(videoPageHtml)) {
+        throw new YoutubeTranscriptVideoUnavailableError(identifier);
+      }
 
-    // Check for errors
-    if (Helpers.hasCaptchaChallenge(videoPageBody)) {
-      throw new YoutubeTranscriptTooManyRequestError();
-    }
+      // Step 2: Extract API key
+      const apiKey = Helpers.extractApiKey(videoPageHtml);
+      if (!apiKey) {
+        throw new YoutubeTranscriptError('Could not extract YouTube API key');
+      }
 
-    if (!Helpers.isVideoAvailable(videoPageBody)) {
-      throw new YoutubeTranscriptVideoUnavailableError(identifier);
-    }
+      // Step 3: Fetch player data using the player endpoint
+      const playerRequestBody = Helpers.createPlayerRequestBody(identifier);
+      const playerResponse = await this.httpClient.fetch(
+        `${Constants.YOUTUBEI_PLAYER_API}?key=${apiKey}`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(playerRequestBody)
+        }
+      );
 
-    // Parse captions data
-    const captions = Helpers.parseCaptionsFromHtml(videoPageBody);
+      if (!playerResponse.ok) {
+        throw new YoutubeTranscriptNotAvailableError(identifier);
+      }
 
-    if (!captions) {
-      throw new YoutubeTranscriptDisabledError(identifier);
-    }
+      const playerData = await playerResponse.json();
 
-    if (!('captionTracks' in captions)) {
-      throw new YoutubeTranscriptNotAvailableError(identifier);
-    }
+      // Step 4: Extract captions from player response
+      const captions = this.extractCaptionsFromPlayerData(playerData, identifier);
 
-    // Parse global translation languages (if available)
-    let globalTranslationLanguages: LanguageInfo[] = [];
-    if (captions.translationLanguages) {
-      globalTranslationLanguages = captions.translationLanguages.map((lang: any) => ({
-        languageCode: lang.languageCode,
-        languageName: lang.languageName.simpleText
-      }));
-    }
-
-    // Create transcript objects for each caption track
-    const transcripts = captions.captionTracks.map((track: CaptionTrack) => {
-      // Use track-specific translation languages if available, otherwise use global ones
-      const translationLanguages: LanguageInfo[] = track.translationLanguages
-        ? track.translationLanguages.map(lang => ({
+      // Step 5: Parse global translation languages (if available)
+      let globalTranslationLanguages: LanguageInfo[] = [];
+      if (captions.translationLanguages) {
+        globalTranslationLanguages = captions.translationLanguages.map((lang: any) => {
+          const langName = lang.languageName as any;
+          const languageName = langName?.runs?.[0]?.text || langName?.simpleText || lang.languageCode;
+          return {
             languageCode: lang.languageCode,
-            languageName: lang.languageName.simpleText
-          }))
-        : globalTranslationLanguages;
+            languageName: languageName
+          };
+        });
+      }
 
-      return new Transcript(
-        identifier,
-        track.name.simpleText,
+      // Step 6: Create transcript objects for each caption track
+      const transcripts = captions.captionTracks.map((track: CaptionTrack) => {
+        // Use track-specific translation languages if available, otherwise use global ones
+        const translationLanguages: LanguageInfo[] = track.translationLanguages
+          ? track.translationLanguages.map(lang => {
+              const langName = lang.languageName as any;
+              const languageName = langName?.runs?.[0]?.text || langName?.simpleText || lang.languageCode;
+              return {
+                languageCode: lang.languageCode,
+                languageName: languageName
+              };
+            })
+          : globalTranslationLanguages;
+
+        // Extract language name from the correct format (handle both formats)
+        const trackName = track.name as any;
+        const languageName = trackName?.runs?.[0]?.text || trackName?.simpleText || track.languageCode;
+
+        return new Transcript(
+          identifier,
+          languageName,
         track.languageCode,
         track.kind === 'asr', // 'asr' means auto-generated
         !!track.isTranslatable,
@@ -136,7 +166,43 @@ export class YoutubeTranscript {
       );
     });
 
-    return new TranscriptList(transcripts, identifier);
+      return new TranscriptList(transcripts, identifier);
+    } catch (error) {
+      // If player API fails, throw appropriate error
+      if (error instanceof YoutubeTranscriptError) {
+        throw error;
+      }
+      throw new YoutubeTranscriptNotAvailableError(identifier);
+    }
+  }
+
+  /**
+   * Extract captions data from player API response (like Python library)
+   */
+  private extractCaptionsFromPlayerData(playerData: any, videoId: string): any {
+    // Check playability status
+    const playabilityStatus = playerData.playabilityStatus;
+    if (playabilityStatus?.status !== 'OK') {
+      const reason = playabilityStatus?.reason;
+      if (reason === 'Sign in to confirm you\'re not a bot') {
+        throw new YoutubeTranscriptTooManyRequestError();
+      }
+      if (reason === 'This video may be inappropriate for some users.') {
+        throw new YoutubeTranscriptVideoUnavailableError(videoId);
+      }
+      if (reason === 'This video is unavailable') {
+        throw new YoutubeTranscriptVideoUnavailableError(videoId);
+      }
+      throw new YoutubeTranscriptVideoUnavailableError(videoId);
+    }
+
+    // Extract captions from player response
+    const captions = playerData.captions?.playerCaptionsTracklistRenderer;
+    if (!captions || !captions.captionTracks) {
+      throw new YoutubeTranscriptDisabledError(videoId);
+    }
+
+    return captions;
   }
 
   /**

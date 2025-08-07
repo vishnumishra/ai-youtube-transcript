@@ -19,4 +19,29 @@ export class Constants {
    */
   public static readonly RE_XML_TRANSCRIPT =
     /<text start="([^"]*)" dur="([^"]*)">([^<]*)<\/text>/g;
+  
+  /**
+   * Regular expression to extract YouTube API key
+   */
+  public static readonly RE_API_KEY = /"INNERTUBE_API_KEY":\s*"([a-zA-Z0-9_-]+)"/;
+  
+  /**
+   * YouTube player API endpoint
+   */
+  public static readonly YOUTUBEI_PLAYER_API = 'https://www.youtube.com/youtubei/v1/player';
+  
+  /**
+   * YouTube client name for API requests
+   */
+  public static readonly YOUTUBE_CLIENT_NAME = 'ANDROID';
+  
+  /**
+   * YouTube client version for API requests
+   */
+  public static readonly YOUTUBE_CLIENT_VERSION = '20.10.38';
+  
+  /**
+   * YouTube homepage URL for API key extraction
+   */
+  public static readonly YOUTUBE_HOMEPAGE = 'https://www.youtube.com/';
 }
